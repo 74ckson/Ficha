@@ -371,49 +371,23 @@ class FichaCatalografica:
         return "\n".join(b[0] for b in self._blocos())
 
     def gerar_pdf(self, caminho: str):
-        """Gera PDF nativo com reportlab — abordagem direta e explícita."""
+        """Gera PDF nativo com reportlab — com quebra de linha e limites."""
         page_w, page_h = A4
         margem_sup = 2.5 * cm
         margem_esq = 2.5 * cm
         margem_dir = 2.5 * cm
         indentacao = 1.2 * cm
+        x_left = margem_esq + indentacao
+        x_right = page_w - margem_dir
+        max_width = x_right - x_left  # largura máxima do texto
 
         font_name = "Times-Roman"
         font_bold = "Times-Bold"
         font_size = 11
-        line_height = font_size * 0.42  # ~4.6pt por linha
+        leading = font_size * 1.4  # espaçamento entre linhas (~15.4pt)
 
         c = canvas.Canvas(caminho, pagesize=A4)
         y = page_h - margem_sup
-
-        def set_font(bold=False):
-            c.setFont(font_bold if bold else font_name, font_size)
-
-        def draw(texto, bold=False, x=margem_esq):
-            nonlocal y
-            set_font(bold)
-            c.drawString(x, y, texto)
-            y -= line_height
-
-        def draw_centered(texto, bold=False):
-            nonlocal y
-            set_font(bold)
-            tw = c.stringWidth(texto, font_bold if bold else font_name, font_size)
-            x = (page_w - tw) / 2
-            c.drawString(x, y, texto)
-            y -= line_height
-
-        def draw_right(texto, bold=False):
-            nonlocal y
-            set_font(bold)
-            tw = c.stringWidth(texto, font_bold if bold else font_name, font_size)
-            x = page_w - margem_dir - tw
-            c.drawString(x, y, texto)
-            y -= line_height
-
-        def skip(cm_val):
-            nonlocal y
-            y -= cm_val
 
         def check_page():
             nonlocal y
@@ -421,26 +395,85 @@ class FichaCatalografica:
                 c.showPage()
                 y = page_h - margem_sup
 
+        def wrap_text(texto, max_w, font):
+            """Quebra texto em linhas que cabem em max_w."""
+            c.setFont(font, font_size)
+            palavras = texto.split()
+            linhas = []
+            linha_atual = ""
+            for p in palavras:
+                teste = f"{linha_atual} {p}".strip() if linha_atual else p
+                if c.stringWidth(teste, font, font_size) <= max_w:
+                    linha_atual = teste
+                else:
+                    if linha_atual:
+                        linhas.append(linha_atual)
+                    linha_atual = p
+            if linha_atual:
+                linhas.append(linha_atual)
+            return linhas
+
+        def draw_lines(texto, x, bold=False, right_align=False):
+            """Desenha texto com quebra automática de linha."""
+            nonlocal y
+            font = font_bold if bold else font_name
+            linhas = wrap_text(texto, max_width, font)
+
+            # Para alinhamento à direita: calcular largura da maior linha
+            if right_align:
+                max_line_w = 0
+                for ln in linhas:
+                    w = c.stringWidth(ln, font, font_size)
+                    if w > max_line_w:
+                        max_line_w = w
+
+            for i, ln in enumerate(linhas):
+                check_page()
+                if right_align:
+                    # Recalcular x baseado na largura desta linha
+                    lw = c.stringWidth(ln, font, font_size)
+                    cx = page_w - margem_dir - lw
+                else:
+                    cx = x
+                c.setFont(font, font_size)
+                c.drawString(cx, y, ln)
+                y -= leading
+
+        def draw_centered_lines(texto, bold=False):
+            nonlocal y
+            font = font_bold if bold else font_name
+            linhas = wrap_text(texto, page_w - 2 * margem_esq, font)
+            for ln in linhas:
+                check_page()
+                tw = c.stringWidth(ln, font, font_size)
+                cx = (page_w - tw) / 2
+                c.setFont(font, font_size)
+                c.drawString(cx, y, ln)
+                y -= leading
+
+        def skip(cm_val):
+            nonlocal y
+            y -= cm_val
+
         d = self.dados
 
-        # ═══ CABEÇALHO (espaçamento 0.55cm entre linhas) ═══
-        draw_centered("Dados Internacionais de Catalogação na Publicação")
-        skip(0.55 * cm - line_height)
-        draw_centered(d.get("universidade") or "Universidade Federal do Ceará")
-        skip(0.55 * cm - line_height)
-        draw_centered("Biblioteca Universitária")
-        skip(0.75 * cm)  # após cabeçalho
-        texto_auto = (
+        # ═══ CABEÇALHO ═══
+        draw_centered_lines("Dados Internacionais de Catalogação na Publicação")
+        skip(0.1 * cm)
+        draw_centered_lines(d.get("universidade") or "Universidade Federal do Ceará")
+        skip(0.1 * cm)
+        draw_centered_lines("Biblioteca Universitária")
+        skip(0.5 * cm)
+        draw_centered_lines(
             "Gerada automaticamente pelo módulo Catalog, "
             "mediante os dados fornecidos pelo(a) autor(a)"
         )
-        draw_centered(texto_auto)
-        skip(0.5 * cm)  # após "Gerada automaticamente"
+        skip(0.5 * cm)
 
-        # ═══ CÓDIGO DE ENTRADA ═══
+        # ═══ CÓDIGO ═══
         codigo = gerar_codigo_entrada(d.get("autor_sobrenome", ""), d.get("titulo", ""))
-        draw(codigo, margem_esq + indentacao)
-        skip(0.5 * cm)  # após código
+        draw_lines(codigo, x_left)
+        skip(0.4 * cm)
 
         # ═══ AUTOR + TÍTULO ═══
         titulo_completo = d.get("titulo", "")
@@ -451,9 +484,9 @@ class FichaCatalografica:
         )
         if d.get("autor_sobrenome"):
             autor_fmt = formatar_nome_autor(d["autor_sobrenome"], d.get("autor_prenomes", ""))
-            draw(f"{autor_fmt} {titulo_completo} / {autor_barra}.", bold=True, x=margem_esq + indentacao)
+            draw_lines(f"{autor_fmt} {titulo_completo} / {autor_barra}.", x_left, bold=True)
         else:
-            draw(titulo_completo + ".", bold=True, x=margem_esq + indentacao)
+            draw_lines(titulo_completo + ".", x_left, bold=True)
 
         # ═══ IMPRESSÃO ═══
         editora_str = d.get("editora") or d.get("universidade", "")
@@ -469,7 +502,7 @@ class FichaCatalografica:
             else:
                 partes.append(d["local"])
         if partes:
-            draw(" – " + " – ".join(partes) + ".", x=margem_esq + indentacao)
+            draw_lines(" – " + " – ".join(partes) + ".", x_left)
 
         # ═══ DESCRIÇÃO FÍSICA ═══
         il = d.get("ilustracoes", "il.").strip()
@@ -479,11 +512,11 @@ class FichaCatalografica:
             il = f"il. {il}"
         il = il.rstrip(".")
         if d.get("paginas"):
-            draw(f"{d['paginas']} : {il}.", x=margem_esq + indentacao)
+            draw_lines(f"{d['paginas']} : {il}.", x_left)
         else:
-            draw(f"{il}.", x=margem_esq + indentacao)
+            draw_lines(f"{il}.", x_left)
 
-        skip(0.8 * cm)  # desc. física → tipo trabalho
+        skip(0.5 * cm)
 
         # ═══ NOTA DO TRABALHO ═══
         tipo = d.get("tipo_trabalho", "")
@@ -492,10 +525,10 @@ class FichaCatalografica:
             inicio = f"{tipo} ({grau})" if grau else tipo
             detalhes = [d[k] for k in ("universidade", "centro", "curso", "local", "ano") if d.get(k)]
             if detalhes:
-                draw(f"{inicio} – {', '.join(detalhes)}.", x=margem_esq + indentacao)
+                draw_lines(f"{inicio} – {', '.join(detalhes)}.", x_left)
             else:
-                draw(f"{inicio}.", x=margem_esq + indentacao)
-            skip(0.6 * cm)  # tipo → orientador
+                draw_lines(f"{inicio}.", x_left)
+            skip(0.4 * cm)
 
         # ═══ ORIENTAÇÃO ═══
         orient_parts = []
@@ -504,9 +537,9 @@ class FichaCatalografica:
         if d.get("nome_orientador"):
             orient_parts.append(d["nome_orientador"])
         if orient_parts:
-            draw(f"Orientação: {' '.join(orient_parts)}.", x=margem_esq + indentacao)
+            draw_lines(f"Orientação: {' '.join(orient_parts)}.", x_left)
 
-        skip(0.8 * cm)  # orientador → assuntos
+        skip(0.5 * cm)
 
         # ═══ ASSUNTOS + I. TÍTULO ═══
         assuntos = d.get("assuntos", [])
@@ -515,19 +548,19 @@ class FichaCatalografica:
             linha = "  ".join(itens)
             if d.get("titulo"):
                 linha += "    I. Título."
-            draw(linha, x=margem_esq + indentacao)
+            draw_lines(linha, x_left)
         elif d.get("titulo"):
-            draw("I. Título.", x=margem_esq + indentacao)
+            draw_lines("I. Título.", x_left)
 
-        skip(0.8 * cm)  # assuntos → CDD
+        skip(0.5 * cm)
 
-        # ═══ CDD — EXPLÍCITO E DIRETO ═══
+        # ═══ CDD ═══
         if d.get("cdd"):
-            cdd_texto = f"CDD {d['cdd']}"
-            draw_right(cdd_texto)
+            draw_lines(f"CDD {d['cdd']}", x_left, right_align=True)
 
         check_page()
         c.save()
+
 
 
 # ═════════════════════════════════════════════════════════════
