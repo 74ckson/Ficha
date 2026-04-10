@@ -371,105 +371,162 @@ class FichaCatalografica:
         return "\n".join(b[0] for b in self._blocos())
 
     def gerar_pdf(self, caminho: str):
+        """Gera PDF nativo com reportlab — abordagem direta e explícita."""
         page_w, page_h = A4
         margem_sup = 2.5 * cm
         margem_esq = 2.5 * cm
         margem_dir = 2.5 * cm
-
-        espaco_linha_cabecalho = 0.55 * cm
-        espaco_pos_cabecalho = 0.75 * cm
-        espaco_pos_cutter = 0.5 * cm
-        espaco_entre_blocos = 0.5 * cm
-        espaco_desc_fisica_tipo = 0.8 * cm
-        espaco_tipo_orientador = 0.6 * cm
-        espaco_orientador_assuntos = 0.8 * cm
-        espaco_assuntos_cdd = 0.8 * cm
         indentacao = 1.2 * cm
 
         font_name = "Times-Roman"
         font_bold = "Times-Bold"
         font_size = 11
+        line_height = font_size * 0.42  # ~4.6pt por linha
 
         c = canvas.Canvas(caminho, pagesize=A4)
         y = page_h - margem_sup
 
-        def draw_text(texto, x=margem_esq, bold=False, right_align=False):
-            nonlocal y
-            if right_align:
-                tw = c.stringWidth(texto, font_bold if bold else font_name, font_size)
-                x = page_w - margem_dir - tw
+        def set_font(bold=False):
             c.setFont(font_bold if bold else font_name, font_size)
-            c.drawString(x, y, texto)
-            y -= font_size * 0.42
 
-        def pular(espaco_cm):
+        def draw(texto, bold=False, x=margem_esq):
             nonlocal y
-            y -= espaco_cm
+            set_font(bold)
+            c.drawString(x, y, texto)
+            y -= line_height
 
-        blocos = self._blocos()
-        cdd_texto = None
+        def draw_centered(texto, bold=False):
+            nonlocal y
+            set_font(bold)
+            tw = c.stringWidth(texto, font_bold if bold else font_name, font_size)
+            x = (page_w - tw) / 2
+            c.drawString(x, y, texto)
+            y -= line_height
 
-        # Separar o CDD dos blocos normais
-        blocos_render = []
-        for b in blocos:
-            if b[0].strip().startswith("CDD ") and b[3]:
-                cdd_texto = b[0]
-            else:
-                blocos_render.append(b)
+        def draw_right(texto, bold=False):
+            nonlocal y
+            set_font(bold)
+            tw = c.stringWidth(texto, font_bold if bold else font_name, font_size)
+            x = page_w - margem_dir - tw
+            c.drawString(x, y, texto)
+            y -= line_height
 
-        i = 0
-        while i < len(blocos_render):
-            texto, centrado, bold, direita = blocos_render[i]
+        def skip(cm_val):
+            nonlocal y
+            y -= cm_val
 
-            if not texto.strip():
-                anterior = blocos_render[i - 1][0] if i > 0 else ""
-
-                if any(kw in anterior for kw in ["Catalogação", "Biblioteca", "autor(a)"]):
-                    pular(espaco_pos_cabecalho)
-                elif anterior.strip() and len(anterior.strip()) <= 6:
-                    pular(espaco_pos_cutter)
-                elif any(kw in anterior.lower() for kw in ["color", "il.", "não il.", "f."]):
-                    pular(espaco_desc_fisica_tipo)
-                elif any(kw in anterior for kw in ["Conclusão", "Dissertação", "Tese"]):
-                    pular(espaco_tipo_orientador)
-                elif "Orientação" in anterior:
-                    pular(espaco_orientador_assuntos)
-                elif "Título" in anterior:
-                    pular(espaco_assuntos_cdd)
-                else:
-                    pular(espaco_entre_blocos)
-                i += 1
-                continue
-
-            if centrado:
-                tw = c.stringWidth(texto, font_name, font_size)
-                x_c = (page_w - tw) / 2
-                c.setFont(font_bold if bold else font_name, font_size)
-                c.drawString(x_c, y, texto)
-                y -= font_size * 0.42
-                if i + 1 < len(blocos_render) and blocos_render[i + 1][0].strip():
-                    pular(espaco_linha_cabecalho - font_size * 0.42)
-            else:
-                draw_text(texto, x=margem_esq + indentacao, bold=bold)
-
+        def check_page():
+            nonlocal y
             if y < 3 * cm:
                 c.showPage()
                 y = page_h - margem_sup
-                c.setFont(font_name, font_size)
 
-            i += 1
+        d = self.dados
 
-        # Renderizar CDD explicitamente
-        if cdd_texto:
-            y -= espaco_assuntos_cdd
-            if y < 3 * cm:
-                c.showPage()
-                y = page_h - margem_sup
-            tw = c.stringWidth(cdd_texto, font_name, font_size)
-            x_cdd = page_w - margem_dir - tw
-            c.setFont(font_name, font_size)
-            c.drawString(x_cdd, y, cdd_texto)
+        # ═══ CABEÇALHO (espaçamento 0.55cm entre linhas) ═══
+        draw_centered("Dados Internacionais de Catalogação na Publicação")
+        skip(0.55 * cm - line_height)
+        draw_centered(d.get("universidade") or "Universidade Federal do Ceará")
+        skip(0.55 * cm - line_height)
+        draw_centered("Biblioteca Universitária")
+        skip(0.75 * cm)  # após cabeçalho
+        texto_auto = (
+            "Gerada automaticamente pelo módulo Catalog, "
+            "mediante os dados fornecidos pelo(a) autor(a)"
+        )
+        draw_centered(texto_auto)
+        skip(0.5 * cm)  # após "Gerada automaticamente"
 
+        # ═══ CÓDIGO DE ENTRADA ═══
+        codigo = gerar_codigo_entrada(d.get("autor_sobrenome", ""), d.get("titulo", ""))
+        draw(codigo, margem_esq + indentacao)
+        skip(0.5 * cm)  # após código
+
+        # ═══ AUTOR + TÍTULO ═══
+        titulo_completo = d.get("titulo", "")
+        if d.get("subtitulo"):
+            titulo_completo += f" : {d['subtitulo']}"
+        autor_barra = formatar_nome_apos_barra(
+            d.get("autor_sobrenome", ""), d.get("autor_prenomes", "")
+        )
+        if d.get("autor_sobrenome"):
+            autor_fmt = formatar_nome_autor(d["autor_sobrenome"], d.get("autor_prenomes", ""))
+            draw(f"{autor_fmt} {titulo_completo} / {autor_barra}.", bold=True, x=margem_esq + indentacao)
+        else:
+            draw(titulo_completo + ".", bold=True, x=margem_esq + indentacao)
+
+        # ═══ IMPRESSÃO ═══
+        editora_str = d.get("editora") or d.get("universidade", "")
+        partes = []
+        if d.get("edicao"):
+            e = d["edicao"] if d["edicao"].endswith(".") else f"{d['edicao']}."
+            partes.append(e)
+        if d.get("local"):
+            if editora_str and d.get("ano"):
+                partes.append(f"{d['local']} : {editora_str}, {d['ano']}")
+            elif editora_str:
+                partes.append(f"{d['local']} : {editora_str}")
+            else:
+                partes.append(d["local"])
+        if partes:
+            draw(" – " + " – ".join(partes) + ".", x=margem_esq + indentacao)
+
+        # ═══ DESCRIÇÃO FÍSICA ═══
+        il = d.get("ilustracoes", "il.").strip()
+        if il.lower().startswith("color"):
+            il = f"il. {il}"
+        elif not il.lower().startswith("il") and not il.lower().startswith("não"):
+            il = f"il. {il}"
+        il = il.rstrip(".")
+        if d.get("paginas"):
+            draw(f"{d['paginas']} : {il}.", x=margem_esq + indentacao)
+        else:
+            draw(f"{il}.", x=margem_esq + indentacao)
+
+        skip(0.8 * cm)  # desc. física → tipo trabalho
+
+        # ═══ NOTA DO TRABALHO ═══
+        tipo = d.get("tipo_trabalho", "")
+        grau = d.get("grau", "")
+        if tipo:
+            inicio = f"{tipo} ({grau})" if grau else tipo
+            detalhes = [d[k] for k in ("universidade", "centro", "curso", "local", "ano") if d.get(k)]
+            if detalhes:
+                draw(f"{inicio} – {', '.join(detalhes)}.", x=margem_esq + indentacao)
+            else:
+                draw(f"{inicio}.", x=margem_esq + indentacao)
+            skip(0.6 * cm)  # tipo → orientador
+
+        # ═══ ORIENTAÇÃO ═══
+        orient_parts = []
+        if d.get("titulo_orientador"):
+            orient_parts.append(d["titulo_orientador"])
+        if d.get("nome_orientador"):
+            orient_parts.append(d["nome_orientador"])
+        if orient_parts:
+            draw(f"Orientação: {' '.join(orient_parts)}.", x=margem_esq + indentacao)
+
+        skip(0.8 * cm)  # orientador → assuntos
+
+        # ═══ ASSUNTOS + I. TÍTULO ═══
+        assuntos = d.get("assuntos", [])
+        if assuntos:
+            itens = [f"{i + 1}. {a}." for i, a in enumerate(assuntos)]
+            linha = "  ".join(itens)
+            if d.get("titulo"):
+                linha += "    I. Título."
+            draw(linha, x=margem_esq + indentacao)
+        elif d.get("titulo"):
+            draw("I. Título.", x=margem_esq + indentacao)
+
+        skip(0.8 * cm)  # assuntos → CDD
+
+        # ═══ CDD — EXPLÍCITO E DIRETO ═══
+        if d.get("cdd"):
+            cdd_texto = f"CDD {d['cdd']}"
+            draw_right(cdd_texto)
+
+        check_page()
         c.save()
 
 
