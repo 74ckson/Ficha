@@ -407,23 +407,34 @@ class FichaCatalografica:
             y -= espaco_cm
 
         blocos = self._blocos()
+        cdd_texto = None
+
+        # Separar o CDD dos blocos normais
+        blocos_render = []
+        for b in blocos:
+            if b[0].strip().startswith("CDD ") and b[3]:
+                cdd_texto = b[0]
+            else:
+                blocos_render.append(b)
+
         i = 0
-        while i < len(blocos):
-            texto, centrado, bold, direita = blocos[i]
+        while i < len(blocos_render):
+            texto, centrado, bold, direita = blocos_render[i]
 
             if not texto.strip():
-                anterior = blocos[i - 1][0] if i > 0 else ""
+                anterior = blocos_render[i - 1][0] if i > 0 else ""
+
                 if any(kw in anterior for kw in ["Catalogação", "Biblioteca", "autor(a)"]):
                     pular(espaco_pos_cabecalho)
-                elif anterior and len(anterior) <= 6 and not anterior == "":
+                elif anterior.strip() and len(anterior.strip()) <= 6:
                     pular(espaco_pos_cutter)
-                elif "color" in anterior or "il." in anterior or "f." in anterior:
+                elif any(kw in anterior.lower() for kw in ["color", "il.", "não il.", "f."]):
                     pular(espaco_desc_fisica_tipo)
-                elif "Conclusão" in anterior or "Dissertação" in anterior or "Tese" in anterior:
+                elif any(kw in anterior for kw in ["Conclusão", "Dissertação", "Tese"]):
                     pular(espaco_tipo_orientador)
                 elif "Orientação" in anterior:
                     pular(espaco_orientador_assuntos)
-                elif "Título" in anterior or "I." in anterior:
+                elif "Título" in anterior:
                     pular(espaco_assuntos_cdd)
                 else:
                     pular(espaco_entre_blocos)
@@ -436,10 +447,8 @@ class FichaCatalografica:
                 c.setFont(font_bold if bold else font_name, font_size)
                 c.drawString(x_c, y, texto)
                 y -= font_size * 0.42
-                if i + 1 < len(blocos) and blocos[i + 1][0].strip():
+                if i + 1 < len(blocos_render) and blocos_render[i + 1][0].strip():
                     pular(espaco_linha_cabecalho - font_size * 0.42)
-            elif direita:
-                draw_text(texto, right_align=True, bold=bold)
             else:
                 draw_text(texto, x=margem_esq + indentacao, bold=bold)
 
@@ -449,6 +458,17 @@ class FichaCatalografica:
                 c.setFont(font_name, font_size)
 
             i += 1
+
+        # Renderizar CDD explicitamente
+        if cdd_texto:
+            y -= espaco_assuntos_cdd
+            if y < 3 * cm:
+                c.showPage()
+                y = page_h - margem_sup
+            tw = c.stringWidth(cdd_texto, font_name, font_size)
+            x_cdd = page_w - margem_dir - tw
+            c.setFont(font_name, font_size)
+            c.drawString(x_cdd, y, cdd_texto)
 
         c.save()
 
