@@ -248,8 +248,8 @@ def formatar_nome_autor(sobrenome: str, prenomes: str) -> str:
     if not sobrenome and not prenomes:
         return ""
     if not prenomes:
-        return f"{sobrenome.upper()}."
-    return f"{sobrenome.upper()}, {prenomes.strip()}."
+        return f"{sobrenome.capitalize()}."
+    return f"{sobrenome.capitalize()}, {prenomes.strip()}."
 
 
 def formatar_nome_apos_barra(sobrenome: str, prenomes: str) -> str:
@@ -287,8 +287,6 @@ class FichaCatalografica:
         add("")
 
         codigo = gerar_codigo_entrada(d.get("autor_sobrenome", ""), d.get("titulo", ""))
-        add(codigo)
-        add("")
 
         titulo_completo = d.get("titulo", "")
         if d.get("subtitulo"):
@@ -300,9 +298,9 @@ class FichaCatalografica:
 
         if d.get("autor_sobrenome"):
             autor_fmt = formatar_nome_autor(d["autor_sobrenome"], d.get("autor_prenomes", ""))
-            add(f"{autor_fmt} {titulo_completo} / {autor_barra}.", bold=True)
+            add(f"{codigo}  {autor_fmt} {titulo_completo} / {autor_barra}.")
         else:
-            add(titulo_completo + ".", bold=True)
+            add(f"{codigo}  {titulo_completo}.")
 
         editora_str = d.get("editora") or d.get("universidade", "")
         partes = []
@@ -470,12 +468,8 @@ class FichaCatalografica:
         )
         skip(0.5 * cm)
 
-        # ═══ CÓDIGO ═══
+        # ═══ CÓDIGO + AUTOR + TÍTULO (tudo na mesma linha) ═══
         codigo = gerar_codigo_entrada(d.get("autor_sobrenome", ""), d.get("titulo", ""))
-        draw_lines(codigo, x_left)
-        skip(0.4 * cm)
-
-        # ═══ AUTOR + TÍTULO ═══
         titulo_completo = d.get("titulo", "")
         if d.get("subtitulo"):
             titulo_completo += f" : {d['subtitulo']}"
@@ -484,9 +478,9 @@ class FichaCatalografica:
         )
         if d.get("autor_sobrenome"):
             autor_fmt = formatar_nome_autor(d["autor_sobrenome"], d.get("autor_prenomes", ""))
-            draw_lines(f"{autor_fmt} {titulo_completo} / {autor_barra}.", x_left, bold=True)
+            draw_lines(f"{codigo}  {autor_fmt} {titulo_completo} / {autor_barra}.", x_left)
         else:
-            draw_lines(titulo_completo + ".", x_left, bold=True)
+            draw_lines(f"{codigo}  {titulo_completo}.", x_left)
 
         # ═══ IMPRESSÃO ═══
         editora_str = d.get("editora") or d.get("universidade", "")
